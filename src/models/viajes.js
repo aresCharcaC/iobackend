@@ -12,6 +12,14 @@ module.exports = (sequelize, DataTypes) => {
       Viaje.belongsTo(models.MetodoPago, { foreignKey: 'metodo_pago_id', as: 'metodoDePago' });
       Viaje.hasMany(models.OfertaViaje, { foreignKey: 'viaje_id', as: 'ofertas' });
       Viaje.hasMany(models.SeguimientoViaje, { foreignKey: 'viaje_id', as: 'seguimiento' });
+      
+      // ✅ NUEVA ASOCIACIÓN PARA MÉTODOS DE PAGO MÚLTIPLES
+      Viaje.belongsToMany(models.MetodoPago, {
+        through: models.ViajeMetodosPago,
+        foreignKey: 'viaje_id',
+        otherKey: 'metodo_pago_id',
+        as: 'metodosPago'
+      });
     }
 
     // ✅ MÉTODOS CRÍTICOS PARA MÓDULO VIAJES
@@ -86,6 +94,29 @@ module.exports = (sequelize, DataTypes) => {
     estado: { 
       type: DataTypes.STRING(30),  // ← Especificar longitud
       allowNull: false 
+    },
+    
+    // ✅ NUEVOS CAMPOS PARA INFORMACIÓN DEL USUARIO
+    precio_sugerido: {
+      type: DataTypes.DECIMAL(8, 2),
+      allowNull: true,
+      comment: 'Precio sugerido por la aplicación'
+    },
+    usuario_rating: {
+      type: DataTypes.DECIMAL(3, 2),
+      allowNull: false,
+      defaultValue: 0.00,
+      comment: 'Rating del usuario (0-5)'
+    },
+    usuario_nombre: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+      comment: 'Nombre del usuario para mostrar al conductor'
+    },
+    usuario_foto: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+      comment: 'URL de la foto de perfil del usuario'
     },
     
     // ✅ FECHAS COMPLETAS (faltaban muchas):

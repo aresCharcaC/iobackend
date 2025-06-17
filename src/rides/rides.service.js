@@ -1,5 +1,5 @@
 const {v4: uuidv4} = require('uuid');
-const {Viaje, OfertaViaje, Conductor , Usuario, Vehiculo} = require('../models');
+const {Viaje, OfertaViaje, Conductor , Usuario, Vehiculo, MetodoPago, ViajeMetodosPago} = require('../models');
 const locationService = require('./location.service');
 const websocketServer = require('../websocket/websocket.server');
 const firebaseService = require('../notifications/firebase.service');
@@ -164,13 +164,25 @@ async createViaje(userId, rideData, distanceKm){
     try {
         const viajeId = uuidv4();
 
-        // calculando tiepo estimado (aprox 25 km/k en ciudad) 
+        // calculando tiempo estimado (aprox 25 km/h en ciudad) 
         const tiempoEstimado = Math.ceil((distanceKm / 25) * 60) // en minutos
 
         // calculando tarifa referencial base (opcional puede ser null tambien)
         const tarifaReferencial = this.calculateBaseFare(distanceKm);
 
-        // guardando el tabla viaje
+        // ✅ OBTENER INFORMACIÓN DEL USUARIO
+        const usuario = await Usuario.findByPk(userId, {
+            attributes: ['id', 'nombre_completo', 'foto_perfil']
+        });
+
+        if (!usuario) {
+            throw new NotFoundError('Usuario no encontrado');
+        }
+
+        // ✅ CALCULAR PRECIO SUGERIDO SI NO SE PROPORCIONA
+        const precioSugerido = rideData.precio_sugerido || this.calculateSuggestedPrice(distanceKm);
+
+        // guardando en la tabla viaje con información del usuario
         const viaje = await Viaje.create({
             id: viajeId,
             usuario_id: userId,
@@ -182,15 +194,43 @@ async createViaje(userId, rideData, distanceKm){
             destino_lng: rideData.destino_lng,
             distancia_km: distanceKm,
             tiempo_estimado_minutos: tiempoEstimado,
-            precio_sugerido: rideData.precio_sugerido || null, // puede ser null al principio
+            precio_sugerido: precioSugerido,
             tarifa_referencial: tarifaReferencial,
+            // ✅ INFORMACIÓN DEL USUARIO PARA MOSTRAR AL CONDUCTOR
+            usuario_nombre: usuario.nombre_completo,
+            usuario_foto: usuario.foto_perfil,
+            usuario_rating: 0.00, // Por defecto 0, se actualizará con el sistema de rating
             estado: 'solicitado',
             fecha_solicitud: new Date()
         });
+
+        // ✅ GUARDAR MÉTODOS DE PAGO SI SE PROPORCIONAN
+        if (rideData.metodos_pago && Array.isArray(rideData.metodos_pago) && rideData.metodos_pago.length > 0) {
+            console.log(`💳 Guardando ${rideData.metodos_pago.length} métodos de pago para viaje ${viajeId}`);
+            
+            // Verificar que los métodos de pago existen
+            const metodosValidos = await MetodoPago.findAll({
+                where: {
+                    id: rideData.metodos_pago
+                }
+            });
+
+            if (metodosValidos.length > 0) {
+                // Crear las relaciones en la tabla intermedia
+                const viajeMetodos = metodosValidos.map(metodo => ({
+                    viaje_id: viajeId,
+                    metodo_pago_id: metodo.id
+                }));
+
+                await ViajeMetodosPago.bulkCreate(viajeMetodos);
+                console.log(`✅ ${metodosValidos.length} métodos de pago asociados al viaje`);
+            }
+        }
+
         return viaje;
         
     } catch (error) {
-        console.error('❌ Error creanddo viaje en BD: ', error.message);
+        console.error('❌ Error creando viaje en BD: ', error.message);
         throw error; 
     }
 }
@@ -636,7 +676,7 @@ async acceptOffer(rideId, offerId, userId) {
         }
      }
 /**
- * ✅ OBTENER SOLICITUDES CERCANAS PARA CONDUCTOR
+ * ✅ OBTENER SOLICITUDES CERCANAS PARA CONDUCTOR CON INFORMACIÓN COMPLETA
  */
 async getNearbyRequests(conductorId, conductorLat, conductorLng) {
   try {
@@ -653,13 +693,20 @@ async getNearbyRequests(conductorId, conductorLat, conductorLng) {
         {
           model: Usuario,
           as: 'pasajero',
-          attributes: ['id', 'nombre_completo', 'telefono']
+          attributes: ['id', 'nombre_completo', 'telefono', 'foto_perfil']
         },
         {
           model: OfertaViaje,
           as: 'ofertas',
           where: { conductor_id: conductorId },
           required: false // LEFT JOIN para ver si ya ofertó
+        },
+        {
+          // ✅ INCLUIR MÉTODOS DE PAGO
+          model: MetodoPago,
+          as: 'metodosPago',
+          through: { attributes: [] }, // No incluir campos de la tabla intermedia
+          attributes: ['id', 'nombre', 'tipo']
         }
       ],
       order: [['fecha_solicitud', 'DESC']],
@@ -686,11 +733,18 @@ async getNearbyRequests(conductorId, conductorLat, conductorLng) {
           viaje.origen_lng
         );
 
+        // ✅ PREPARAR MÉTODOS DE PAGO
+        const metodosPago = viaje.metodosPago ? viaje.metodosPago.map(metodo => metodo.nombre) : [];
+
         nearbyRequests.push({
           viaje_id: viaje.id,
-          pasajero: {
-            nombre: viaje.pasajero.nombre_completo,
-            telefono: viaje.pasajero.telefono
+          // ✅ INFORMACIÓN COMPLETA DEL USUARIO
+          usuario: {
+            id: viaje.pasajero.id,
+            nombre: viaje.usuario_nombre || viaje.pasajero.nombre_completo,
+            telefono: viaje.pasajero.telefono,
+            foto: viaje.usuario_foto || viaje.pasajero.foto_perfil,
+            rating: viaje.usuario_rating || 0.0
           },
           origen: {
             lat: viaje.origen_lat,
@@ -705,13 +759,21 @@ async getNearbyRequests(conductorId, conductorLat, conductorLng) {
           distancia_km: viaje.distancia_km,
           distancia_conductor: distance,
           tiempo_llegada_estimado: tiempoLlegada,
-          precio_sugerido: viaje.precio_sugerido,
-          tarifa_referencial: viaje.tarifa_referencial,
+          // ✅ PRECIOS COMPLETOS
+          precio_usuario: viaje.precio_sugerido, // Lo que pide el usuario
+          precio_sugerido_app: viaje.tarifa_referencial, // Lo que sugiere la app
+          // ✅ MÉTODOS DE PAGO
+          metodos_pago: metodosPago,
           fecha_solicitud: viaje.fecha_solicitud,
           ya_oferté: viaje.ofertas && viaje.ofertas.length > 0,
           total_ofertas: await OfertaViaje.count({
             where: { viaje_id: viaje.id, estado: 'pendiente' }
-          })
+          }),
+          // ✅ COORDENADAS PARA USO INTERNO
+          coordenadas: {
+            origen: { lat: viaje.origen_lat, lng: viaje.origen_lng },
+            destino: { lat: viaje.destino_lat, lng: viaje.destino_lng }
+          }
         });
       }
     }
@@ -719,6 +781,7 @@ async getNearbyRequests(conductorId, conductorLat, conductorLng) {
     // Ordenar por distancia del conductor
     nearbyRequests.sort((a, b) => a.distancia_conductor - b.distancia_conductor);
 
+    console.log(`✅ Encontradas ${nearbyRequests.length} solicitudes cercanas para conductor ${conductorId}`);
     return nearbyRequests;
 
   } catch (error) {
@@ -825,16 +888,20 @@ async checkUserActiveRides(userId){
             const tiempoTranscurrido = new Date() - new Date(activeRide.fecha_solicitud);
             const minutosTranscurridos = Math.floor(tiempoTranscurrido / (1000 * 60));
             
-            // ✅ LÓGICA MEJORADA DE AUTO-CANCELACIÓN
+            // ✅ LÓGICA MEJORADA DE AUTO-CANCELACIÓN - MÁS AGRESIVA
             let shouldCancel = false;
             let cancelReason = '';
             
-            if (activeRide.estado === 'solicitado' && minutosTranscurridos > 6) {
+            if (activeRide.estado === 'solicitado' && minutosTranscurridos > 3) {
                 shouldCancel = true;
                 cancelReason = `Auto-cancelado por timeout - ${minutosTranscurridos} minutos sin ofertas`;
-            } else if (activeRide.estado === 'ofertas_recibidas' && minutosTranscurridos > 2) {
+            } else if (activeRide.estado === 'ofertas_recibidas' && minutosTranscurridos > 1) {
                 shouldCancel = true;
                 cancelReason = `Auto-cancelado - ${minutosTranscurridos} minutos sin aceptar ofertas`;
+            } else if (minutosTranscurridos > 10) {
+                // Cancelar cualquier viaje que tenga más de 10 minutos sin importar el estado
+                shouldCancel = true;
+                cancelReason = `Auto-cancelado por inactividad - ${minutosTranscurridos} minutos de antigüedad`;
             }
             
             if (shouldCancel) {
@@ -883,11 +950,24 @@ async checkUserActiveRides(userId){
             throw new ConflictError(`Ya tiene un viaje activo (${activeRide.estado}). ID: ${activeRide.id}. Complete o cancele el viaje actual antes de crear uno nuevo.`);
         }
 }
-     // calculadno la tarifaac base referencial
+     // calculando la tarifa base referencial
 calculateBaseFare(distanceKm){
         const baseFare = 3.5; // S/, 3.50
         const perKm = 1.2; // 1.2 soles  por KM
         return Math.round((baseFare + (distanceKm * perKm)) * 100)/ 100;
+     }
+
+     // ✅ CALCULAR PRECIO SUGERIDO INTELIGENTE
+calculateSuggestedPrice(distanceKm){
+        const baseFare = 3.5; // S/, 3.50 base
+        const perKm = 1.5; // S/, 1.50 por km (un poco más que la tarifa referencial)
+        const demandMultiplier = 1.1; // 10% adicional por demanda
+        
+        const basePrice = baseFare + (distanceKm * perKm);
+        const suggestedPrice = basePrice * demandMultiplier;
+        
+        // Redondear a 0.50 más cercano para precios más atractivos
+        return Math.round(suggestedPrice * 2) / 2;
      }
 
      // calcular tiempo de llegada del conductor

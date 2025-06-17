@@ -154,47 +154,124 @@ handleLocationUpdate(socket, data){
     console.log(` Actualizacion de ubicacoin conductor ${socket.userId}`);
 }
 
-  /**
-   *  MÉTODOS DE NOTIFICACIÓN 
+ /**
+   *  MÉTODOS DE NOTIFICACIÓN MEJORADOS
    */
 
   // notificar al pasajero
   notifyUser(userId, event, data){
     try {
         const room = `user_${userId}`;
-        this.io.to(room).emit(event, data);
-        console.log(`Notificaciòn enviada al usuario ${userId}: ${event}`)
+        
+        // ✅ AGREGAR TIMESTAMP Y METADATA
+        const enrichedData = {
+            ...data,
+            timestamp: new Date().toISOString(),
+            event_type: event,
+            user_id: userId
+        };
+        
+        this.io.to(room).emit(event, enrichedData);
+        console.log(`📱 Notificación enviada al usuario ${userId}: ${event}`)
         
     } catch (error) {
         console.log(`❌ Error notificando usuario ${userId}: `, error.message) ;
     }
-
   }
   
-  // notificar al conductor
-
+  // notificar al conductor con información enriquecida
   notifyDriver(conductorId, event, data){
     try {
         const room = `driver_${conductorId}`;
-        this.io.to(room).emit(event, data);
-        console.log(`📱 Notificación enviada a conductor ${conductorId}: ${event}`); 
+        
+        // ✅ AGREGAR TIMESTAMP Y METADATA PARA CONDUCTORES
+        const enrichedData = {
+            ...data,
+            timestamp: new Date().toISOString(),
+            event_type: event,
+            conductor_id: conductorId,
+            // ✅ INFORMACIÓN ADICIONAL PARA SOLICITUDES
+            ...(event === 'ride:new_request' && {
+                notification_priority: 'high',
+                requires_response: true,
+                expires_at: new Date(Date.now() + (data.timeout_segundos * 1000)).toISOString()
+            })
+        };
+        
+        this.io.to(room).emit(event, enrichedData);
+        console.log(`🚗 Notificación enviada a conductor ${conductorId}: ${event}`); 
     } catch (error) {
-        console.error(`❌ Error notificando al conductor  ${conductorId}: `, error.message);
-        
-        
+        console.error(`❌ Error notificando al conductor ${conductorId}: `, error.message);
     }
   }
 
-  notifyMultileDrivers(conductorIds, event, data){
+  // ✅ NUEVO MÉTODO PARA NOTIFICAR SOLICITUD CON INFORMACIÓN COMPLETA
+  notifyDriverNewRequest(conductorId, requestData){
+    try {
+        const room = `driver_${conductorId}`;
+        
+        // ✅ ESTRUCTURA COMPLETA PARA EL CONDUCTOR
+        const completeRequestData = {
+            event_type: 'ride:new_request',
+            timestamp: new Date().toISOString(),
+            conductor_id: conductorId,
+            notification_priority: 'high',
+            requires_response: true,
+            expires_at: new Date(Date.now() + (requestData.timeout_segundos * 1000)).toISOString(),
+            
+            // ✅ DATOS DEL VIAJE
+            viaje: {
+                id: requestData.viaje_id,
+                origen: requestData.origen,
+                destino: requestData.destino,
+                distancia_km: requestData.distancia_km,
+                tiempo_estimado: requestData.tiempo_estimado,
+                distancia_conductor: requestData.distancia_conductor
+            },
+            
+            // ✅ INFORMACIÓN DEL USUARIO (si está disponible)
+            usuario: requestData.usuario || {
+                nombre: 'Usuario',
+                foto: null,
+                rating: 0.0
+            },
+            
+            // ✅ INFORMACIÓN DE PRECIOS
+            precios: {
+                usuario_pide: requestData.precio_sugerido,
+                app_sugiere: requestData.precio_sugerido_app || requestData.precio_sugerido,
+                moneda: 'PEN'
+            },
+            
+            // ✅ MÉTODOS DE PAGO
+            metodos_pago: requestData.metodos_pago || [],
+            
+            // ✅ CONFIGURACIÓN DE TIMEOUT
+            timeout_segundos: requestData.timeout_segundos,
+            
+            // ✅ ACCIONES DISPONIBLES
+            acciones: {
+                puede_ofertar: true,
+                tiempo_para_ofertar: requestData.timeout_segundos
+            }
+        };
+        
+        this.io.to(room).emit('ride:new_request', completeRequestData);
+        console.log(`🎯 Solicitud completa enviada a conductor ${conductorId}`);
+        
+    } catch (error) {
+        console.error(`❌ Error enviando solicitud completa al conductor ${conductorId}: `, error.message);
+    }
+  }
+
+  notifyMultipleDrivers(conductorIds, event, data){
     try {
         conductorIds.forEach(conductorId =>{
             this.notifyDriver(conductorId, event, data);
         });
-              console.log(`📡 Notificación broadcast a ${conductorIds.length} conductores: ${event}`);
+        console.log(`📡 Notificación broadcast a ${conductorIds.length} conductores: ${event}`);
     } catch (error) {
-        console.error(' ❌ Error en notificaiòn multiple', error.message);
-        
-        
+        console.error(' ❌ Error en notificación múltiple', error.message);
     }
   }
   
