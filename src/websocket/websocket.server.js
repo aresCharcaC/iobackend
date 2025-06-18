@@ -141,8 +141,28 @@ handleRideRequest(socket, data){
 
 handleDriverOffer(socket, data){
     console.log(`Oferta de conductor via WebSocket: `, data);
-    // notificar al pasajero
-    this.notifyUser(data.userId, 'ride:offer_reveived', data);
+    
+    // ✅ CORREGIR: Obtener userId del viaje, no del data
+    // Necesitamos buscar el viaje para obtener el usuario_id correcto
+    const { Viaje } = require('../models');
+    
+    Viaje.findByPk(data.rideId || data.viaje_id)
+        .then(viaje => {
+            if (viaje) {
+                console.log(`📱 Enviando oferta al usuario ${viaje.usuario_id} para viaje ${viaje.id}`);
+                // ✅ CORREGIR: Usar el evento correcto 'ride:offer_received' (no 'ride:offer_reveived')
+                this.notifyUser(viaje.usuario_id, 'ride:offer_received', {
+                    ...data,
+                    viaje_id: viaje.id,
+                    usuario_id: viaje.usuario_id
+                });
+            } else {
+                console.error(`❌ Viaje no encontrado: ${data.rideId || data.viaje_id}`);
+            }
+        })
+        .catch(error => {
+            console.error(`❌ Error buscando viaje para notificar oferta:`, error.message);
+        });
 }
 handleAcceptOffer(socket, data){
     console.log(`Oferta aceptada via websocket: `, data);
@@ -171,8 +191,15 @@ handleLocationUpdate(socket, data){
             user_id: userId
         };
         
+        console.log(`📱 Enviando evento '${event}' al usuario ${userId} en room '${room}'`);
+        console.log(`📋 Datos del evento:`, JSON.stringify(enrichedData, null, 2));
+        
+        // Verificar si hay conexiones en el room
+        const socketsInRoom = this.io.sockets.adapter.rooms.get(room);
+        console.log(`🔍 Sockets conectados en room '${room}':`, socketsInRoom ? socketsInRoom.size : 0);
+        
         this.io.to(room).emit(event, enrichedData);
-        console.log(`📱 Notificación enviada al usuario ${userId}: ${event}`)
+        console.log(`✅ Evento '${event}' enviado al usuario ${userId}`)
         
     } catch (error) {
         console.log(`❌ Error notificando usuario ${userId}: `, error.message) ;

@@ -27,6 +27,9 @@ router.get('/driver/nearby-requests', authenticateConductorToken, ridesControlle
 // Crear oferta para un viaje
 router.post('/driver/offers', authenticateConductorToken, ridesController.createDriverOffer);
 
+// Alias para compatibilidad (mismo endpoint con nombre singular)
+router.post('/driver/offer', authenticateConductorToken, ridesController.createDriverOffer);
+
 // Obtener ofertas del conductor
 router.get('/driver/my-offers', authenticateConductorToken, ridesController.getDriverOffers);
 

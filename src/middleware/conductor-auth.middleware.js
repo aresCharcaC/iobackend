@@ -53,7 +53,7 @@ async function authenticateConductorToken(req, res, next) {
     if(!conductor){
       return res.status(401).json({
         success: false,
-        message: 'no es econtro al conducto actual',
+        message: 'Usurio actual no econtraddo',
         type: 'user_not_found',
         debug: {
           token_conductorId: decoded.conductorId,

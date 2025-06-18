@@ -399,8 +399,39 @@ async notifyNearbyDrivers(drivers, viaje){
             expira_en: 300 // esto son 5 minutos
         };
 
-        // para notificacoin utlizamos websocker del pasajero
-        websocketServer.notifyUser(viaje.usuario_id, 'ride:offer_received', notificationData);
+        // ✅ CORREGIR: Enviar directamente al usuario usando notifyUser
+        console.log(`📱 Enviando notificación de oferta al usuario ${viaje.usuario_id}`);
+        
+        // Estructura de datos completa para el frontend
+        const offerEventData = {
+            oferta_id: oferta.id,
+            viaje_id: viajeId,
+            conductor: {
+                id: conductor.id,
+                nombre_completo: conductor.nombre_completo,
+                nombre: conductor.nombre_completo,
+                telefono: conductor.telefono,
+                calificacion: conductor.calificacion || 0.0,
+                foto_perfil: conductor.foto_perfil,
+                vehiculos: conductor.vehiculos || []
+            },
+            tarifa_propuesta: oferta.tarifa_propuesta,
+            precio: oferta.tarifa_propuesta, // Alias para compatibilidad
+            tiempo_estimado: `${tiempoLlegada} min`,
+            tiempo_estimado_llegada_minutos: tiempoLlegada,
+            distancia_conductor: `${notificationData.distancia_conductor} km`,
+            mensaje: oferta.mensaje || '',
+            estado: 'pendiente',
+            fecha_oferta: oferta.fecha_oferta,
+            created_at: oferta.fecha_oferta,
+            expira_en: 300, // 5 minutos
+            timestamp: new Date().toISOString()
+        };
+        
+        console.log(`📋 Datos de oferta enviados:`, JSON.stringify(offerEventData, null, 2));
+        
+        // Enviar directamente al usuario
+        websocketServer.notifyUser(viaje.usuario_id, 'ride:offer_received', offerEventData);
 
         // tambine le envimos un push notification con firebase - DESHABILITADO TEMPORALMENTE
         console.log(`🚫 Push notification omitida para usuario ${viaje.usuario_id} - Firebase deshabilitado`);
@@ -1040,6 +1071,102 @@ calculateArrivalTime(conductorLat, conductorLng, origenLat, origenLng){
                 console.error(`❌ Error en timeout del viaje ${viajeId}:`, error.message);
             }
         }, this.TIMEOUT_SECONDS * 1000); // Convertir a milisegundos
+    }
+
+    /**
+     * ✅ RECHAZAR OFERTA DE CONDUCTOR (PASAJERO RECHAZA)
+     */
+    async rejectOffer(rideId, offerId, userId) {
+        try {
+            console.log(`❌ Rechazando oferta: rideId=${rideId}, offerId=${offerId}, userId=${userId}`);
+
+            // 1. Validar parámetros
+            if (!rideId || !offerId || !userId) {
+                throw new Error(`Parámetros faltantes: rideId=${rideId}, offerId=${offerId}, userId=${userId}`);
+            }
+
+            // 2. Buscar viaje y verificar que pertenece al usuario
+            const viaje = await Viaje.findOne({
+                where: { id: rideId, usuario_id: userId }
+            });
+
+            if (!viaje) {
+                throw new NotFoundError('Viaje no encontrado o no autorizado');
+            }
+
+            // 3. Verificar estado del viaje
+            if (!['solicitado', 'ofertas_recibidas'].includes(viaje.estado)) {
+                throw new ConflictError("El viaje ya no está disponible para rechazar ofertas");
+            }
+
+            // 4. Buscar la oferta específica
+            const oferta = await OfertaViaje.findOne({
+                where: { 
+                    id: offerId, 
+                    viaje_id: rideId, 
+                    estado: 'pendiente' 
+                },
+                include: [{
+                    model: Conductor,
+                    as: 'conductor',
+                    attributes: ['id', 'nombre_completo']
+                }]
+            });
+
+            if (!oferta) {
+                throw new NotFoundError('Oferta no encontrada o ya no está disponible');
+            }
+
+            // 5. Rechazar la oferta
+            await oferta.update({ 
+                estado: 'rechazada',
+                fecha_rechazo: new Date()
+            });
+
+            // 6. Notificar al conductor que su oferta fue rechazada
+            try {
+                websocketServer.notifyDriver(oferta.conductor_id, 'ride:offer_rejected', {
+                    viaje_id: rideId,
+                    oferta_id: offerId,
+                    mensaje: 'El pasajero rechazó tu oferta',
+                    motivo: 'rechazada_por_usuario'
+                });
+
+                console.log(`📱 Conductor ${oferta.conductor_id} notificado del rechazo`);
+            } catch (notificationError) {
+                console.warn('⚠️ Error notificando rechazo al conductor:', notificationError.message);
+            }
+
+            // 7. Verificar si quedan ofertas pendientes
+            const ofertasPendientes = await OfertaViaje.count({
+                where: { 
+                    viaje_id: rideId, 
+                    estado: 'pendiente' 
+                }
+            });
+
+            // 8. Si no quedan ofertas pendientes, cambiar estado del viaje
+            if (ofertasPendientes === 0) {
+                await viaje.update({ estado: 'solicitado' });
+                console.log(`📝 Viaje ${rideId} vuelve a estado 'solicitado' - no quedan ofertas pendientes`);
+            }
+
+            console.log(`✅ Oferta ${offerId} rechazada exitosamente`);
+
+            return {
+                oferta_rechazada: {
+                    id: offerId,
+                    conductor: oferta.conductor.nombre_completo,
+                    fecha_rechazo: new Date()
+                },
+                ofertas_pendientes: ofertasPendientes,
+                estado_viaje: ofertasPendientes === 0 ? 'solicitado' : viaje.estado
+            };
+
+        } catch (error) {
+            console.error('❌ Error rechazando oferta:', error.message);
+            throw error;
+        }
     }
 
     /**
