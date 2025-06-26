@@ -175,7 +175,8 @@ class ConductorAuthController {
         data: {
           message: result.message,
           conductor: result.conductor,
-          accessToken: result.tokens?.accessToken
+          accessToken: result.tokens?.accessToken,
+          refreshToken: result.tokens?.refreshToken // Incluir refresh token para Flutter
         }
       });
 

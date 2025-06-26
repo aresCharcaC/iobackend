@@ -337,18 +337,41 @@ async login(req, res) {
 
 async refreshToken(req, res) {
   try {
-    const refreshToken = req.cookies.refreshToken;
+    console.log('\n🔄 === REFRESH TOKEN DEBUG ===');
+    console.log('Headers:', req.headers);
+    console.log('Cookies:', req.cookies);
+    console.log('==============================\n');
+
+    let refreshToken = null;
+
+    // 1. Buscar refresh token en cookies (para web)
+    if (req.cookies && req.cookies.refreshToken) {
+      refreshToken = req.cookies.refreshToken;
+      console.log('🍪 Refresh token obtenido de cookies');
+    }
+
+    // 2. Buscar refresh token en headers Authorization (para Flutter)
+    if (!refreshToken) {
+      const authHeader = req.headers['authorization'];
+      if (authHeader && authHeader.startsWith('Bearer ')) {
+        refreshToken = authHeader.substring(7); // Remover "Bearer "
+        console.log('📱 Refresh token obtenido de Authorization header');
+      }
+    }
     
     if (!refreshToken) {
+      console.log('❌ No se encontró refresh token');
       return res.status(401).json({
         success: false,
-        message: 'Refresh token requerido'
+        message: 'Refresh token requerido',
+        hint: 'Envía el refresh token en cookies (web) o Authorization header (Flutter)'
       });
     }
     
+    console.log('🔍 Procesando refresh token...');
     const result = await authService.refreshToken(refreshToken);
     
-    // Configurar solo el nuevo access token
+    // Configurar solo el nuevo access token en cookies (para compatibilidad web)
     res.cookie('accessToken', result.accessToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
@@ -356,13 +379,20 @@ async refreshToken(req, res) {
       maxAge: 15 * 60 * 1000 // 15 minutos
     });
     
+    console.log('✅ Token refrescado exitosamente');
+    
+    // Responder con el nuevo access token para Flutter
     res.status(200).json({
       success: true,
-      data: { message: 'Token renovado exitosamente' }
+      data: { 
+        message: 'Token renovado exitosamente',
+        accessToken: result.accessToken // Incluir el token en la respuesta para Flutter
+      }
     });
     
   } catch (error) {
     console.error('❌ Error en refreshToken controller:', error.message);
+    console.error('❌ Stack:', error.stack);
     
     // ✅ MANEJO DE ERRORES SIN THIS
     if (error.message.includes('Refresh token requerido')) {

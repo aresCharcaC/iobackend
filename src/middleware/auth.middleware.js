@@ -46,7 +46,7 @@ async function authenticateAccessToken(req, res, next) {
     if(!usuario){
       return res.status(401).json({
         success: false,
-        message: 'Usurio actual no econtraddo',
+        message: 'Usuario actual no encontrado',
         type: 'user_not_found'
       });
     }
