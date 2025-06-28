@@ -43,19 +43,31 @@ class WebSocketServer{
 
                 console.log('🔑 Token encontrado:', token.substring(0, 20) + '...');
 
+                // Verificar token (siempre token de usuario)
                 const decoded = jwt.verify(token, process.env.JWT_SECRET);
                 
-                // Manejar diferentes tipos de tokens (usuario vs conductor)
-                if (decoded.conductorId) {
-                    // Token de conductor
-                    socket.userId = decoded.conductorId;
-                    socket.userType = 'conductor';
-                } else if (decoded.id) {
-                    // Token de usuario
-                    socket.userId = decoded.id;
-                    socket.userType = decoded.type || 'usuario';
+                // Obtener ID de usuario del token
+                socket.userId = decoded.userId || decoded.id;
+                
+                // Determinar el tipo de usuario basado en datos adicionales
+                const conductorId = socket.handshake.auth.conductorId || 
+                                   socket.handshake.query.conductorId ||
+                                   socket.handshake.auth.type === 'conductor' && socket.userId;
+                
+                if (conductorId) {
+                    // Verificar si existe el conductor con este ID
+                    const conductor = await Conductor.findByPk(conductorId);
+                    if (conductor && conductor.estado === 'activo') {
+                        socket.userType = 'conductor';
+                        socket.conductorId = conductorId;
+                        console.log(`🚗 Cliente identificado como conductor: ${conductorId}`);
+                    } else {
+                        socket.userType = 'usuario';
+                        console.log(`👤 Cliente identificado como usuario (conductor no válido): ${socket.userId}`);
+                    }
                 } else {
-                    throw new Error('Token no contiene ID válido');
+                    socket.userType = 'usuario';
+                    console.log(`👤 Cliente identificado como usuario: ${socket.userId}`);
                 }
                 
                 console.log(`🔐 Cliente autenticado: ${socket.userType} ${socket.userId}`);
@@ -90,8 +102,8 @@ handleConnection(socket){
             this.connectedUsers.set(socket.userId, socket.id);
             socket.join(`user_${socket.userId}`);
         }else if(socket.userType === 'conductor'){
-            this.connectedDrivers.set(socket.userId, socket.id);
-            socket.join(`driver_${socket.userId}`);
+            this.connectedDrivers.set(socket.conductorId, socket.id);
+            socket.join(`driver_${socket.conductorId}`);
         }
 
         // TODOS los eventos necesarios para pasajero
@@ -128,7 +140,7 @@ handleDisconnection(socket){
     if(socket.userType === 'usuario'){
         this.connectedUsers.delete(socket.userId);
     }else if(socket.userType === 'conductor'){
-        this.connectedDrivers.delete(socket.userId);
+        this.connectedDrivers.delete(socket.conductorId);
     }
 }
 

@@ -99,7 +99,7 @@ class ConductorAuthController {
 
   /**
    * POST /api/conductor-auth/login
-   * Login con DNI y contraseña
+   * Login con DNI y contraseña - Sin generar tokens específicos de conductor
    */
   async login(req, res) {
     try {
@@ -143,40 +143,19 @@ class ConductorAuthController {
 
       console.log(`📱 Intentando login para conductor DNI: ${dni}`);
 
-      // ✅ INTENTAR LOGIN
+      // ✅ INTENTAR LOGIN SIN GENERAR TOKENS ESPECÍFICOS
       const result = await conductorAuthService.login(dni, password);
-      console.log('✅ Login exitoso, configurando cookies...');
+      console.log('✅ Login exitoso');
 
-      // ✅ CONFIGURAR COOKIES MANUALMENTE
-      if (result.tokens) {
-        // Access Token - 15 minutos
-        res.cookie('accessToken', result.tokens.accessToken, {
-          httpOnly: true,
-          secure: process.env.NODE_ENV === 'production',
-          sameSite: 'lax',
-          maxAge: 15 * 60 * 1000,
-          path: '/'
-        });
-
-        // Refresh Token - 7 días
-        res.cookie('refreshToken', result.tokens.refreshToken, {
-          httpOnly: true,
-          secure: process.env.NODE_ENV === 'production',
-          sameSite: 'lax',
-          maxAge: 7 * 24 * 60 * 60 * 1000,
-          path: '/'
-        });
-
-        console.log('🍪 Cookies de autenticación configuradas para conductor');
-      }
+      // No configurar cookies específicas de conductor
+      // Los tokens de usuario se manejarán por separado
 
       res.status(200).json({
         success: true,
         data: {
           message: result.message,
-          conductor: result.conductor,
-          accessToken: result.tokens?.accessToken,
-          refreshToken: result.tokens?.refreshToken // Incluir refresh token para Flutter
+          conductor: result.conductor
+          // No incluir tokens específicos de conductor
         }
       });
 
@@ -185,7 +164,7 @@ class ConductorAuthController {
       console.error('❌ Stack:', error.stack);
       res.status(401).json({
         success: false,
-        message: 'No se pudo autenticar al usuario',
+        message: 'No se pudo autenticar al conductor',
         error: error.message
       });
     }

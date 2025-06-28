@@ -75,7 +75,7 @@ class ConductorAuthService {
   }
 
   /**
-   * Login con DNI y contraseña
+   * Login con DNI y contraseña - Sin generar tokens específicos
    */
   async login(dni, password) {
     try {
@@ -106,18 +106,14 @@ class ConductorAuthService {
         throw new AuthenticationError('DNI o contraseña incorrectos');
       }
 
-      // ✅ GENERAR TOKENS
-      const tokens = this.generateTokens(conductor);
-
-      // ✅ CREAR SESIÓN
-      await this.createSession(conductor.id, tokens.refreshToken);
+      // No generar tokens específicos de conductor
+      // No crear sesión específica de conductor
 
       console.log('✅ Login exitoso para conductor:', conductor.dni);
 
       return {
         message: 'Inicio de sesión exitoso',
-        conductor: conductor.toPublicJSON(),
-        tokens
+        conductor: conductor.toPublicJSON()
       };
 
     } catch (error) {

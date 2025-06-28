@@ -5,6 +5,12 @@ const bcrypt = require('bcryptjs');
 module.exports = (sequelize, DataTypes) => {
   class Conductor extends Model {
     static associate(models) {
+      // Relación con Usuario
+      Conductor.belongsTo(models.Usuario, {
+        foreignKey: 'usuario_id',
+        as: 'usuario'
+      });
+
       // Relaciones
       Conductor.hasMany(models.DocumentoConductor, {
         foreignKey: 'conductor_id',
@@ -95,6 +101,14 @@ module.exports = (sequelize, DataTypes) => {
       defaultValue: DataTypes.UUIDV4,
       primaryKey: true,
       allowNull: false
+    },
+    usuario_id: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      references: {
+        model: 'usuarios',
+        key: 'id'
+      }
     },
     dni: {
       type: DataTypes.STRING(8),

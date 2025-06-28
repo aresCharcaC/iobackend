@@ -18,6 +18,12 @@ module.exports = (sequelize, DataTypes) => {
         foreignKey: 'pasajero_id',
         as: 'sesiones'
       });
+
+      // Relación con Conductor
+      Usuario.hasOne(models.Conductor, {
+        foreignKey: 'usuario_id',
+        as: 'conductor'
+      });
      
     }
 
